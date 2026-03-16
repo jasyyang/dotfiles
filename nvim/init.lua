@@ -421,6 +421,7 @@ require('lazy').setup({
       end,
       formatters_by_ft = {
         lua = { 'stylua' },
+        markdown = { 'prettier' },
         python = { 'ruff_organize_imports', 'ruff_format' },
         rust = { 'rustfmt' },
       },
@@ -433,6 +434,9 @@ require('lazy').setup({
       'nvim-lua/plenary.nvim',
       'nvim-tree/nvim-web-devicons',
       'MunifTanjim/nui.nvim',
+    },
+    keys = {
+      { '<leader>e', '<cmd>Neotree toggle<cr>', desc = 'Toggle N[e]otree' },
     },
   },
 
