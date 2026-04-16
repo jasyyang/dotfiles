@@ -11,7 +11,7 @@ vim.o.undofile = true
 vim.o.ignorecase = true
 vim.o.smartcase = true
 vim.o.signcolumn = 'yes'
-vim.o.updatetime = 200
+vim.o.updatetime = 400
 vim.o.timeoutlen = 300
 vim.o.splitright = true
 vim.o.splitbelow = true
@@ -21,16 +21,53 @@ vim.o.inccommand = 'split'
 vim.o.cursorline = true
 vim.o.scrolloff = 25
 vim.o.confirm = true
+vim.o.title = true
+vim.o.titlestring = '%{fnamemodify(getcwd(), ":t")}'
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
+
+-- Hover: K to show, K again to enter (for scrolling), q to close
+vim.keymap.set('n', 'K', function()
+  local wins = vim.api.nvim_list_wins()
+  for _, win in ipairs(wins) do
+    local config = vim.api.nvim_win_get_config(win)
+    if config.relative ~= '' and config.focusable then
+      vim.api.nvim_set_current_win(win)
+      vim.keymap.set('n', 'q', '<cmd>close<cr>', { buffer = vim.api.nvim_win_get_buf(win) })
+      return
+    end
+  end
+  vim.lsp.buf.hover()
+end, { desc = 'Hover / enter hover window' })
+
 vim.diagnostic.config {
   update_in_insert = false,
   severity_sort = true,
-  float = { border = 'rounded', source = 'if_many' },
+  float = {
+    border = 'rounded',
+    source = 'if_many',
+    max_width = 80,
+    wrap = true,
+  },
   underline = { severity = { min = vim.diagnostic.severity.WARN } },
-  virtual_text = true,
+  virtual_text = {
+    spacing = 4,
+    prefix = '●',
+    format = function(diagnostic)
+      local max_width = 50
+      local message = diagnostic.message:gsub('\n', ' ')
+      if #message > max_width then return string.sub(message, 1, max_width) .. '...' end
+      return message
+    end,
+  },
   virtual_lines = false,
   jump = { float = true },
 }
+
+vim.api.nvim_create_autocmd('CursorHold', {
+  callback = function()
+    vim.diagnostic.open_float(nil, { focus = false, scope = 'cursor' })
+  end,
+})
 vim.keymap.set('n', '<leader>Q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 vim.keymap.set('n', '<leader>q', vim.cmd.q, { desc = '[q]uit current window' })
 vim.keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
@@ -337,15 +374,23 @@ require('lazy').setup({
 
       ---@type table<string, vim.lsp.Config>
       local servers = {
-        basedpyright = {
+        ruff = {
           settings = {
-            ['basedpyright'] = {
-              disableOrganizeImports = true, -- Use Ruff's import organizer
+            configuration = vim.g.profile == 'kensho'
+                and vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml'
+              or nil,
+          },
+        },
+        basedpyright = {
+          handlers = {
+            -- Suppress basedpyright diagnostics, mypy handles type checking
+            ['textDocument/publishDiagnostics'] = function() end,
+          },
+          settings = {
+            basedpyright = {
+              disableOrganizeImports = true, -- ruff handles this
               analysis = {
-                typeCheckingMode = 'recommended',
-                autoSearchPaths = true,
-                useLibraryCodeForTypes = true,
-                autoImportCompletions = true,
+                typeCheckingMode = 'basic', -- needed for hover/completions
               },
             },
           },
@@ -446,6 +491,14 @@ require('lazy').setup({
         javascript = { 'prettierd' },
         javascriptreact = { 'prettierd' },
       },
+      formatters = vim.g.profile == 'kensho' and {
+        ruff_format = {
+          prepend_args = { '--config', vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml' },
+        },
+        ruff_organize_imports = {
+          prepend_args = { '--config', vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml' },
+        },
+      } or {},
     },
   },
 
@@ -633,6 +686,11 @@ require('lazy').setup({
     config = function()
       vim.opt.background = 'dark'
       vim.cmd.colorscheme 'tokyonight-night'
+      -- Dim virtual text to be less distracting
+      vim.api.nvim_set_hl(0, 'DiagnosticVirtualTextError', { fg = '#8a5555' })
+      vim.api.nvim_set_hl(0, 'DiagnosticVirtualTextWarn', { fg = '#7a6b50' })
+      vim.api.nvim_set_hl(0, 'DiagnosticVirtualTextInfo', { fg = '#506880' })
+      vim.api.nvim_set_hl(0, 'DiagnosticVirtualTextHint', { fg = '#507a60' })
     end,
   },
 

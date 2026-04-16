@@ -7,8 +7,32 @@ return {
     event = { 'BufReadPre', 'BufNewFile' },
     config = function()
       local lint = require 'lint'
+
+      -- Configure dmypy (mypy daemon) for faster incremental type checking
+      local function get_venv_python()
+        local venv = vim.env.VIRTUAL_ENV
+        if venv then return venv .. '/bin/python' end
+        local cwd_venv = vim.fn.getcwd() .. '/.venv/bin/python'
+        if vim.fn.filereadable(cwd_venv) == 1 then return cwd_venv end
+        return nil
+      end
+
+      -- Configure mypy args
+      local mypy = lint.linters.mypy
+      if vim.g.profile == 'kensho' then
+        table.insert(mypy.args, '--config-file')
+        table.insert(mypy.args, vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml')
+        table.insert(mypy.args, '--follow-imports=normal')
+      end
+      local venv_python = get_venv_python()
+      if venv_python then
+        table.insert(mypy.args, '--python-executable')
+        table.insert(mypy.args, venv_python)
+      end
+
       lint.linters_by_ft = {
         markdown = { 'markdownlint' },
+        python = { 'mypy' },
       }
 
       -- To allow other plugins to add linters to require('lint').linters_by_ft,

@@ -25,6 +25,25 @@ eval "$(zoxide init zsh)"
 # Starship prompt
 eval "$(starship init zsh)"
 
+# ghostty set tab title to pwd
+function set_terminal_title() {
+    [[ -n "$GHOSTTY_RESOURCES_DIR" ]] && print -Pn '\e]0;%1~\a'
+}
+precmd_functions+=(set_terminal_title) # set title on term startup
+chpwd_functions+=(set_terminal_title) # set title on change dir
+
+function nvim() {
+    command nvim "$@"
+    set_terminal_title
+}
+
+# global kube aliases
+alias kube='kubectl'
+alias k='kubectl'
+
+# global aliases
+alias ..='cd ..'
+
 # ============================================================================
 # Profile-Specific Configuration
 # ============================================================================

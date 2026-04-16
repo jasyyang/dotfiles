@@ -2,6 +2,7 @@ command = "/bin/zsh"
 
 working-directory = ~/code
 shell-integration = zsh
+shell-integration-features = no-title
 quick-terminal-animation-duration = 0
 quick-terminal-autohide = false
 window-padding-x = 10
@@ -13,12 +14,12 @@ window-theme = dark
 background-opacity = 0.85
 background-blur=8
 background=#000000
-macos-titlebar-style = hidden
+macos-titlebar-style = tabs
 cursor-style = block
 theme = TokyoNight Night 
 
 font-family = Hack Nerd Font Mono
-font-size=13
+font-size=13.5
 font-thicken=true
 font-thicken-strength=1
 adjust-cell-height=1
