@@ -25,7 +25,8 @@ vim.o.title = true
 vim.o.titlestring = '%{fnamemodify(getcwd(), ":t")}'
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
--- Hover: K to show, K again to enter (for scrolling), q to close
+-- Hover: K to show, K again to enter (for scrolling), q to close.
+-- On a git hunk, show the hunk diff; otherwise LSP hover.
 vim.keymap.set('n', 'K', function()
   local wins = vim.api.nvim_list_wins()
   for _, win in ipairs(wins) do
@@ -34,6 +35,16 @@ vim.keymap.set('n', 'K', function()
       vim.api.nvim_set_current_win(win)
       vim.keymap.set('n', 'q', '<cmd>close<cr>', { buffer = vim.api.nvim_win_get_buf(win) })
       return
+    end
+  end
+  local ok, gitsigns = pcall(require, 'gitsigns')
+  if ok then
+    local before = vim.api.nvim_list_wins()
+    gitsigns.preview_hunk()
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if not vim.tbl_contains(before, win) and vim.api.nvim_win_get_config(win).relative ~= '' then
+        return
+      end
     end
   end
   vim.lsp.buf.hover()
@@ -64,9 +75,7 @@ vim.diagnostic.config {
 }
 
 vim.api.nvim_create_autocmd('CursorHold', {
-  callback = function()
-    vim.diagnostic.open_float(nil, { focus = false, scope = 'cursor' })
-  end,
+  callback = function() vim.diagnostic.open_float(nil, { focus = false, scope = 'cursor' }) end,
 })
 vim.keymap.set('n', '<leader>Q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 vim.keymap.set('n', '<leader>q', vim.cmd.q, { desc = '[q]uit current window' })
@@ -93,21 +102,22 @@ end
 local rtp = vim.opt.rtp
 rtp:prepend(lazypath)
 require('lazy').setup({
+  { import = 'custom.plugins' },
   { 'NMAC427/guess-indent.nvim', opts = {} },
   {
     'lewis6991/gitsigns.nvim',
     ---@module 'gitsigns'
     ---@type Gitsigns.Config
     ---@diagnostic disable-next-line: missing-fields
-    opts = {
-      signs = {
-        add = { text = '+' }, ---@diagnostic disable-line: missing-fields
-        change = { text = '~' }, ---@diagnostic disable-line: missing-fields
-        delete = { text = '_' }, ---@diagnostic disable-line: missing-fields
-        topdelete = { text = '‾' }, ---@diagnostic disable-line: missing-fields
-        changedelete = { text = '~' }, ---@diagnostic disable-line: missing-fields
-      },
-    },
+    -- opts = {
+    --   signs = {
+    -- add = { text = '+' }, ---@diagnostic disable-line: missing-fields
+    -- change = { text = '~' }, ---@diagnostic disable-line: missing-fields
+    -- delete = { text = '_' }, ---@diagnostic disable-line: missing-fields
+    -- topdelete = { text = '‾' }, ---@diagnostic disable-line: missing-fields
+    --   changedelete = { text = '~' }, ---@diagnostic disable-line: missing-fields
+    -- },
+    -- },
   },
 
   {
@@ -252,6 +262,7 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[s]earch Recent Files ("." for repeat)' })
       vim.keymap.set('n', '<leader>sc', builtin.commands, { desc = '[s]earch [c]ommands' })
       vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
+      vim.keymap.set('n', 'gr', require('telescope.builtin').lsp_references, { desc = '[g]oto [r]eferences' })
 
       vim.api.nvim_create_autocmd('LspAttach', {
         group = vim.api.nvim_create_augroup('telescope-lsp-attach', { clear = true }),
@@ -376,9 +387,7 @@ require('lazy').setup({
       local servers = {
         ruff = {
           settings = {
-            configuration = vim.g.profile == 'kensho'
-                and vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml'
-              or nil,
+            configuration = vim.g.profile == 'kensho' and vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml' or nil,
           },
         },
         basedpyright = {
@@ -452,6 +461,30 @@ require('lazy').setup({
         vim.lsp.enable(name)
       end
     end,
+  },
+  {
+    'toppair/peek.nvim',
+    event = { 'VeryLazy' },
+    build = 'deno task --quiet build:fast',
+    config = function()
+      require('peek').setup()
+      vim.api.nvim_create_user_command('PeekOpen', require('peek').open, {})
+      vim.api.nvim_create_user_command('PeekClose', require('peek').close, {})
+    end,
+    keys = {
+      {
+        '<leader>tp',
+        function()
+          local peek = require 'peek'
+          if peek.is_open() then
+            peek.close()
+          else
+            peek.open()
+          end
+        end,
+        desc = '[t]oggle [p]eek',
+      },
+    },
   },
 
   {
@@ -585,8 +618,8 @@ require('lazy').setup({
         },
       }
       local buttons = {
-        button('d', '󰱼  Current directory', '<cmd>Neotree dir=. position=current<CR>'),
-        button('r', '  Recent files', ':Telescope oldfiles<CR>'),
+        button('d', '󰱼  Neotree directory', '<cmd>Neotree dir=. position=current<CR>'),
+        button('f', '  Files', ':Telescope find_files<CR>'),
         button('g', '󰈬  Live grep', ':Telescope live_grep<CR>'),
         button('c', '  Chezmoi', '<cmd>Neotree dir=~/.local/share/chezmoi position=current<CR>'),
       }
@@ -691,6 +724,13 @@ require('lazy').setup({
       vim.api.nvim_set_hl(0, 'DiagnosticVirtualTextWarn', { fg = '#7a6b50' })
       vim.api.nvim_set_hl(0, 'DiagnosticVirtualTextInfo', { fg = '#506880' })
       vim.api.nvim_set_hl(0, 'DiagnosticVirtualTextHint', { fg = '#507a60' })
+      -- GitSigns: match VSCode gutter colors
+      vim.api.nvim_set_hl(0, 'GitSignsAdd', { fg = '#587c0c' })
+      vim.api.nvim_set_hl(0, 'GitSignsChange', { fg = '#0c7d9d' })
+      vim.api.nvim_set_hl(0, 'GitSignsDelete', { fg = '#94151b' })
+      vim.api.nvim_set_hl(0, 'GitSignsTopdelete', { fg = '#94151b' })
+      vim.api.nvim_set_hl(0, 'GitSignsChangedelete', { fg = '#0c7d9d' })
+      vim.api.nvim_set_hl(0, 'GitSignsUntracked', { fg = '#587c0c' })
     end,
   },
 
