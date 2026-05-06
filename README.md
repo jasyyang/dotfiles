@@ -10,7 +10,7 @@ My dotfiles, managed with [chezmoi](https://www.chezmoi.io/).
 ├── dot_config/
 │   ├── direnv/                # direnv config
 │   ├── ghostty/               # Ghostty terminal
-│   ├── git/                   # Global gitignore
+│   ├── git/                   # Other global git configs
 │   ├── nvim/                  # Neovim (kickstart-based)
 │   ├── shell/                 # Profile-specific env & aliases
 │   └── starship.toml          # Starship prompt
@@ -21,7 +21,7 @@ My dotfiles, managed with [chezmoi](https://www.chezmoi.io/).
 ## Install
 
 ```sh
-brew install chezmoi neovim ghostty starship direnv zoxide
+brew install chezmoi neovim ghostty starship direnv zoxide git-delta
 chezmoi init git@github.com:jasyyang/dotfiles.git
 chezmoi apply
 ```
