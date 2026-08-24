@@ -450,6 +450,7 @@ require('lazy').setup({
         },
         ts_ls = {},
         stylua = {},
+        clangd = {},
         lua_ls = {
           on_init = function(client)
             if client.workspace_folders then
@@ -528,22 +529,17 @@ require('lazy').setup({
     ---@type conform.setupOpts
     opts = {
       notify_on_error = false,
-      format_on_save = function(bufnr)
-        local disable_filetypes = { c = true, cpp = true }
-        if disable_filetypes[vim.bo[bufnr].filetype] then
-          return nil
-        else
-          return {
-            timeout_ms = 500,
-            lsp_format = 'fallback',
-          }
-        end
-      end,
+      format_on_save = {
+        timeout_ms = 500,
+        lsp_format = 'fallback',
+      },
       formatters_by_ft = {
         lua = { 'stylua' },
         markdown = { 'prettier' },
         python = { 'ruff_organize_imports', 'ruff_format' },
         rust = { 'rustfmt' },
+        c = { 'clang-format' },
+        cpp = { 'clang-format' },
         typescript = { 'prettierd' },
         typescriptreact = { 'prettierd' },
         javascript = { 'prettierd' },
@@ -790,6 +786,7 @@ require('lazy').setup({
       local parsers = {
         'bash',
         'c',
+        'cpp',
         'diff',
         'html',
         'lua',
