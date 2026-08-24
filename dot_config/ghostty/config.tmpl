@@ -8,7 +8,7 @@ quick-terminal-autohide = false
 window-padding-x = 10
 clipboard-read = allow
 
-fullscreen = true
+fullscreen = {{ if eq .profile "linux" }}false{{ else }}true{{ end }}
 macos-non-native-fullscreen = true
 window-theme = dark
 background-opacity = 0.85
