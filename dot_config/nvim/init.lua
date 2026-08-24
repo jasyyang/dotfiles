@@ -2,6 +2,26 @@ vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 vim.g.profile = vim.env.CONFIG_PROFILE
 vim.g.have_nerd_font = true
+
+-- Resolve kensho_lint's pyproject.toml: prefer the version installed in the
+-- closest venv (so lint rules match what CI uses for that project), fall back
+-- to the in-repo source copy.
+function _G.kensho_lint_config(start_dir)
+  local global = vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml'
+  local function in_venv(venv)
+    if not venv or venv == '' then return nil end
+    local hits = vim.fn.glob(venv .. '/lib/python*/site-packages/kensho_lint/pyproject.toml', false, true)
+    return hits[1]
+  end
+  local hit = in_venv(vim.env.VIRTUAL_ENV)
+  if hit then return hit end
+  if start_dir and start_dir ~= '' then
+    local found = vim.fs.find({ '.venv', 'venv' }, { upward = true, path = start_dir, type = 'directory' })[1]
+    hit = in_venv(found)
+    if hit then return hit end
+  end
+  return global
+end
 vim.o.number = true
 vim.o.mouse = 'a'
 vim.o.showmode = false
@@ -20,6 +40,7 @@ vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
 vim.o.inccommand = 'split'
 vim.o.cursorline = true
 vim.o.scrolloff = 25
+vim.o.foldlevelstart = 99
 vim.o.confirm = true
 vim.o.title = true
 vim.o.titlestring = '%{fnamemodify(getcwd(), ":t")}'
@@ -385,11 +406,15 @@ require('lazy').setup({
 
       ---@type table<string, vim.lsp.Config>
       local servers = {
-        ruff = {
-          settings = {
-            configuration = vim.g.profile == 'kensho' and vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml' or nil,
-          },
-        },
+        ruff = vim.g.profile == 'kensho' and {
+          on_init = function(client)
+            local root = client.workspace_folders and client.workspace_folders[1] and client.workspace_folders[1].name or vim.fn.getcwd()
+            client.config.settings = vim.tbl_deep_extend('force', client.config.settings or {}, {
+              configuration = _G.kensho_lint_config(root),
+            })
+          end,
+          settings = {},
+        } or {},
         basedpyright = {
           handlers = {
             -- Suppress basedpyright diagnostics, mypy handles type checking
@@ -526,10 +551,10 @@ require('lazy').setup({
       },
       formatters = vim.g.profile == 'kensho' and {
         ruff_format = {
-          prepend_args = { '--config', vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml' },
+          prepend_args = function(_, ctx) return { '--config', _G.kensho_lint_config(ctx.dirname) } end,
         },
         ruff_organize_imports = {
-          prepend_args = { '--config', vim.fn.expand '~/code/zentreefish/klib/pkgs/kensho_lint/kensho_lint/pyproject.toml' },
+          prepend_args = function(_, ctx) return { '--config', _G.kensho_lint_config(ctx.dirname) } end,
         },
       } or {},
     },
@@ -795,6 +820,8 @@ require('lazy').setup({
           if not vim.treesitter.language.add(language) then return end
           vim.treesitter.start(buf, language)
           vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+          vim.wo.foldmethod = 'expr'
+          vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
         end,
       })
     end,
