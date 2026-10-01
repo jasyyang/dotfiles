@@ -1,0 +1,28 @@
+# clangd defaults. Without this, a bare .cpp file with no compile_commands.json
+# gets a guessed command line, so C++23-only code (std::println, ranges) shows
+# phantom errors in the editor while compiling fine. These flags mirror the ones
+# the `cxx` script compiles with, so editor diagnostics match the build.
+#
+# Note: CompileFlags.Add appends on top of a project's compile_commands.json too,
+# and a later -std wins. If a real project ever needs a different standard, scope
+# this with an `If: PathMatch:` block rather than deleting it.
+CompileFlags:
+  Add:
+    - -std=c++23
+    - -Wall
+    - -Wextra
+    - -Wpedantic
+
+Diagnostics:
+  ClangTidy:
+    # clangd runs clang-tidy in-process (see --clang-tidy in nvim's clangd cmd).
+    # bugprone/performance catch real mistakes; modernize teaches current idiom.
+    Add:
+      - bugprone-*
+      - performance-*
+      - modernize-*
+    Remove:
+      # Pure style churn, and it fights every tutorial's `int main()`.
+      - modernize-use-trailing-return-type
+      # Flags `#include <stdio.h>` style in C interop examples.
+      - modernize-deprecated-headers

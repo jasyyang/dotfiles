@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+# cxx - compile and run C++ files with learning-friendly diagnostics.
+#
+# Single file:   cxx ex1.cpp          builds ex1 (+ any helper .cpp in the dir)
+# Whole dir:     cxx                  delegates to a Makefile if present,
+#                                     else builds the one file with main()
+# Explicit TUs:  cxx main.cpp io.cpp  first file names the binary
+# Program args:  cxx ex1.cpp -- 5 7
+#
+# Objects and binaries live under ~/.cache/cxx keyed by source dir, so source
+# trees stay free of .o/.d/.dSYM clutter. Incremental builds come from a
+# generated Makefile (header deps via -MMD), not from reimplementing make.
+set -euo pipefail
+
+STD=c++23
+CXX_BIN=${CXX:-clang++}
+CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/cxx"
+
+# -Wpedantic flags non-standard extensions; the sanitizers and libc++ hardening
+# turn silent undefined behaviour (OOB indexing, use-after-free, signed
+# overflow, bad iterators) into an immediate, legible report.
+WARN="-Wall -Wextra -Wpedantic"
+DEBUG_FLAGS="-g -fsanitize=address,undefined -fno-omit-frame-pointer -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG"
+DEBUG_LDFLAGS="-fsanitize=address,undefined"
+RELEASE_FLAGS="-O2 -DNDEBUG"
+
+usage() {
+    cat <<'USAGE'
+usage: cxx [options] [file.cpp ...] [-- program args]
+
+  -O, --optimize     -O2 -DNDEBUG, no sanitizers (for timing code)
+  -b, --build-only   compile but do not run
+  -l, --list         list runnable targets (files defining main) in this dir
+      --clean        remove this directory's build cache
+  -v, --verbose      echo the compiler commands
+  -h, --help         show this help
+USAGE
+}
+
+optimize=0 build_only=0 do_list=0 do_clean=0 verbose=0
+files=() prog_args=()
+
+while (($#)); do
+    case $1 in
+        -O | --optimize) optimize=1 ;;
+        -b | --build-only) build_only=1 ;;
+        -l | --list) do_list=1 ;;
+        --clean) do_clean=1 ;;
+        -v | --verbose) verbose=1 ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            prog_args=("$@")
+            break
+            ;;
+        -*)
+            echo "cxx: unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+        *) files+=("$1") ;;
+    esac
+    shift
+done
+
+die() {
+    echo "cxx: $*" >&2
+    exit 1
+}
+
+# Heuristic: a translation unit is runnable if it defines main at top level.
+# Misses exotic spellings, which is fine - name the file explicitly instead.
+has_main() { grep -qE '^[[:space:]]*(int|auto)[[:space:]]+main[[:space:]]*\(' "$1" 2>/dev/null; }
+
+shopt -s nullglob
+all_srcs=(*.cpp *.cc *.cxx)
+shopt -u nullglob
+
+mains=() helpers=()
+for src in ${all_srcs[@]+"${all_srcs[@]}"}; do
+    if has_main "$src"; then mains+=("$src"); else helpers+=("$src"); fi
+done
+
+if ((do_list)); then
+    ((${#mains[@]})) || die "no .cpp file in $PWD defines main()"
+    for src in "${mains[@]}"; do echo "${src%.*}"; done
+    exit 0
+fi
+
+# Cache key: the absolute source dir, plus the mode so debug and -O objects
+# (built with incompatible flags) never share a directory.
+mode=debug
+((optimize)) && mode=opt
+key=$(printf '%s' "$PWD" | shasum | cut -c1-12)
+build="$CACHE_ROOT/$key/$mode"
+
+if ((do_clean)); then
+    rm -rf "$CACHE_ROOT/$key"
+    echo "cxx: cleaned build cache for $PWD"
+    exit 0
+fi
+
+# No files named: respect a hand-written Makefile, since it encodes intent the
+# generated one cannot (custom targets, link order, extra flags).
+if ((${#files[@]} == 0)) && [[ -f Makefile || -f makefile ]]; then
+    if grep -qE '^run:' Makefile 2>/dev/null; then
+        exec make run ${prog_args[@]+"${prog_args[@]}"}
+    fi
+    exec make ${prog_args[@]+"${prog_args[@]}"}
+fi
+
+if ((${#files[@]} == 0)); then
+    case ${#mains[@]} in
+        0) die "no .cpp file in $PWD defines main() - nothing to run" ;;
+        1) files=("${mains[0]}") ;;
+        *)
+            {
+                echo "cxx: several files define main(), pick one:"
+                for src in "${mains[@]}"; do echo "  cxx $src"; done
+            } >&2
+            exit 1
+            ;;
+    esac
+fi
+
+for f in "${files[@]}"; do
+    [[ -f $f ]] || die "no such file: $f"
+done
+
+obj_of() {
+    local stem
+    stem=$(basename "$1")
+    printf '%s.o' "${stem%.*}"
+}
+
+helper_objs=""
+for h in ${helpers[@]+"${helpers[@]}"}; do
+    helper_objs+=" $(obj_of "$h")"
+done
+
+# The generated Makefile must have the SAME content no matter which target is
+# requested, or `$(OBJS): $(MAKEFILE_LIST)` below invalidates every object each
+# time you switch between ex1 and ex2. So the default layout emits one link rule
+# per main() in the directory and lets make pick: helper objects are then
+# compiled once and shared across targets.
+#
+# An explicit multi-file list is a different link set, so it gets its own
+# Makefile, named by a hash of that list to keep it stable across runs too.
+if ((${#files[@]} > 1)); then
+    named_main=""
+    for f in "${files[@]}"; do
+        if has_main "$f"; then
+            named_main=$f
+            break
+        fi
+    done
+    [[ -n $named_main ]] || named_main=${files[0]}
+    bin=$(basename "$named_main")
+    bin=${bin%.*}
+
+    objs=""
+    for f in "${files[@]}"; do objs+=" $(obj_of "$f")"; done
+    all_objs=$objs
+    rules="$bin:$objs"$'\n\t''$(CXX) $(LDFLAGS) $^ -o $@'$'\n'
+    mk_name="Makefile.$(printf '%s' "${files[*]}" | shasum | cut -c1-8)"
+else
+    src=${files[0]}
+    bin=$(basename "$src")
+    bin=${bin%.*}
+
+    if ! has_main "$src"; then
+        # No main() means nothing to run; compiling the object alone is still a
+        # useful syntax check, so allow it under --build-only and say so here.
+        ((build_only)) || die "$src defines no main() - run 'cxx --list' to see runnable targets"
+        bin=$(obj_of "$src")
+    fi
+
+    # Emit a rule for every main() in the directory, plus the named file itself
+    # when it lives outside the cwd glob (an explicit path into a subdirectory).
+    rule_srcs=(${mains[@]+"${mains[@]}"})
+    if has_main "$src"; then
+        # Compare basenames, not paths: object names are basename-derived, and
+        # callers (the nvim keymap) pass an absolute path to a file the cwd glob
+        # already found relatively. Comparing paths would emit two rules for the
+        # same target and make would warn about overriding the recipe.
+        seen=0
+        for m in ${rule_srcs[@]+"${rule_srcs[@]}"}; do
+            [[ $(basename "$m") == "$(basename "$src")" ]] && seen=1 && break
+        done
+        ((seen)) || rule_srcs+=("$src")
+    fi
+
+    all_objs=$helper_objs
+    rules=""
+    for m in ${rule_srcs[@]+"${rule_srcs[@]}"}; do
+        stem=$(obj_of "$m")
+        stem=${stem%.o}
+        rules+="$stem: $(obj_of "$m")$helper_objs"$'\n\t''$(CXX) $(LDFLAGS) $^ -o $@'$'\n\n'
+        all_objs+=" $(obj_of "$m")"
+    done
+    mk_name=Makefile
+fi
+
+# Sources are found through VPATH rather than a single $(SRCDIR)/% prefix, so an
+# explicit path into a subdirectory resolves too. Same-basename files in two
+# search dirs would collide on one object name; keep learning dirs flat.
+vpath_dirs=$PWD
+for f in "${files[@]}"; do
+    d=$(cd "$(dirname "$f")" && pwd)
+    [[ $d == "$PWD" ]] || vpath_dirs+=":$d"
+done
+
+if ((optimize)); then
+    cxxflags="-std=$STD $WARN $RELEASE_FLAGS"
+    ldflags=""
+else
+    cxxflags="-std=$STD $WARN $DEBUG_FLAGS"
+    ldflags="$DEBUG_LDFLAGS"
+fi
+
+mkdir -p "$build"
+mk="$build/$mk_name"
+
+# `$(OBJS): $(MAKEFILE_LIST)` makes a flag change invalidate every object, and
+# writing the file only when it differs keeps that from firing on every run.
+new_mk=$(
+    cat <<MAKEFILE
+# Generated by cxx. Safe to delete; regenerated on the next run.
+CXX      := $CXX_BIN
+CXXFLAGS := $cxxflags
+LDFLAGS  := $ldflags
+VPATH    := $vpath_dirs
+OBJS     :=$all_objs
+
+$rules
+%.o: %.cpp
+	\$(CXX) \$(CXXFLAGS) -MMD -MP -c \$< -o \$@
+
+%.o: %.cc
+	\$(CXX) \$(CXXFLAGS) -MMD -MP -c \$< -o \$@
+
+%.o: %.cxx
+	\$(CXX) \$(CXXFLAGS) -MMD -MP -c \$< -o \$@
+
+\$(OBJS): \$(MAKEFILE_LIST)
+
+-include \$(OBJS:.o=.d)
+MAKEFILE
+)
+if [[ ! -f $mk ]] || ! printf '%s\n' "$new_mk" | cmp -s - "$mk"; then
+    printf '%s\n' "$new_mk" >"$mk"
+fi
+
+make_flags=(-C "$build" -f "$mk_name" --no-print-directory)
+((verbose)) || make_flags+=(-s)
+make "${make_flags[@]}" "$bin"
+
+if ((build_only)); then
+    echo "cxx: built $build/$bin"
+    exit 0
+fi
+
+# Run from the source dir so relative paths in the program resolve where the
+# author expects, and exec so signals and the exit status pass straight through.
+exec "$build/$bin" ${prog_args[@]+"${prog_args[@]}"}

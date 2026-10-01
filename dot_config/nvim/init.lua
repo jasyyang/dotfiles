@@ -44,6 +44,58 @@ vim.o.foldlevelstart = 99
 vim.o.confirm = true
 vim.o.title = true
 vim.o.titlestring = '%{fnamemodify(getcwd(), ":t")}'
+
+-- Indent width has to match what each filetype's formatter emits, or
+-- format-on-save snaps the buffer to a different width than you typed at.
+-- Default 4 (c/cpp via ~/.clang-format, python via ruff); nvim's own default is
+-- 8-wide hard tabs, which nothing here formats to.
+vim.o.expandtab = true
+vim.o.tabstop = 4
+vim.o.softtabstop = 4
+vim.o.shiftwidth = 4
+
+vim.api.nvim_create_autocmd('FileType', {
+  desc = 'Match indent width to the filetype formatter',
+  group = vim.api.nvim_create_augroup('indent-width', { clear = true }),
+  -- stylua pins indent_width = 2; prettier defaults to tabWidth 2.
+  pattern = { 'lua', 'markdown', 'json', 'jsonc', 'yaml', 'html', 'css', 'typescript', 'typescriptreact', 'javascript', 'javascriptreact' },
+  callback = function()
+    vim.bo.tabstop = 2
+    vim.bo.softtabstop = 2
+    vim.bo.shiftwidth = 2
+  end,
+})
+
+-- <leader>r in a C/C++ buffer: write, then build and run via the `cxx` script in
+-- a floating terminal. A terminal rather than :make + quickfix because these
+-- programs read std::cin interactively, and because the sanitizer reports are
+-- worth reading in full rather than as quickfix entries.
+local cpp_runner
+vim.api.nvim_create_autocmd('FileType', {
+  desc = 'C/C++ build-and-run keymap',
+  group = vim.api.nvim_create_augroup('cpp-run', { clear = true }),
+  pattern = { 'c', 'cpp' },
+  callback = function(event)
+    vim.keymap.set('n', '<leader>r', function()
+      if vim.bo.modified then vim.cmd 'silent write' end
+      -- Rebuild the terminal each time; toggling an existing one would just
+      -- reopen the finished process instead of running again.
+      if cpp_runner then cpp_runner:shutdown() end
+      cpp_runner = require('toggleterm.terminal').Terminal:new {
+        cmd = 'cxx ' .. vim.fn.shellescape(vim.fn.expand '%:p'),
+        dir = vim.fn.expand '%:p:h', -- so cxx finds helper .cpp files alongside
+        direction = 'float',
+        close_on_exit = false, -- keep output readable after the program exits
+        float_opts = { border = 'rounded', winblend = 25 },
+        on_open = function(term)
+          vim.keymap.set('n', 'q', function() term:close() end, { buffer = term.bufnr, desc = 'Close runner' })
+        end,
+      }
+      cpp_runner:toggle()
+    end, { buffer = event.buf, desc = '[r]un this C/C++ file' })
+  end,
+})
+
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
 -- Hover: K to show, K again to enter (for scrolling), q to close.
@@ -450,7 +502,11 @@ require('lazy').setup({
         },
         ts_ls = {},
         stylua = {},
-        clangd = {},
+        -- clangd bundles clang-tidy; --clang-tidy surfaces its checks as LSP
+        -- diagnostics (respects a project .clang-tidy), so no separate linter.
+        clangd = {
+          cmd = { 'clangd', '--clang-tidy', '--background-index' },
+        },
         lua_ls = {
           on_init = function(client)
             if client.workspace_folders then
@@ -538,8 +594,8 @@ require('lazy').setup({
         markdown = { 'prettier' },
         python = { 'ruff_organize_imports', 'ruff_format' },
         rust = { 'rustfmt' },
-        c = { 'clang-format' },
-        cpp = { 'clang-format' },
+        -- c/cpp intentionally omitted: conform falls back to clangd's LSP
+        -- formatter (lsp_format = 'fallback'), which uses the clang-format engine.
         typescript = { 'prettierd' },
         typescriptreact = { 'prettierd' },
         javascript = { 'prettierd' },
@@ -831,6 +887,12 @@ require('lazy').setup({
   require 'kickstart.plugins.neo-tree',
   require 'kickstart.plugins.gitsigns', -- adds gitsigns recommend keymaps
 }, { ---@diagnostic disable-line: missing-fields
+  rocks = {
+    -- oxocarbon.nvim ships a rockspec, so lazy tries to build it as a luarock.
+    -- Use lazy's bundled hererocks (self-contained luarocks + Lua) so the build
+    -- works across machines with only Python + a C compiler, no system luarocks.
+    hererocks = true,
+  },
   ui = {
     icons = vim.g.have_nerd_font and {} or {
       cmd = '⌘',

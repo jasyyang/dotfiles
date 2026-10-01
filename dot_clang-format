@@ -1,0 +1,15 @@
+# Fallback C/C++ style for anything under $HOME.
+#
+# clang-format walks up from the file to the filesystem root looking for a
+# .clang-format, so this covers scratch files anywhere in $HOME while still
+# losing to any real project that ships its own. Without it, clangd's LSP
+# formatter silently falls back to LLVM style (2 spaces), which is what made
+# format-on-save disagree with the width being typed in the buffer.
+#
+# IndentWidth here must stay in sync with shiftwidth/tabstop for c/cpp in
+# nvim's init.lua, or the mismatch comes straight back.
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100

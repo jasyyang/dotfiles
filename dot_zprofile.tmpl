@@ -7,6 +7,9 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/sbin:/
 export PATH="$PATH:/Applications/Xcode.app/Contents/Developer/usr/bin"
 export PATH="$HOME/.local/bin:$PATH"
 
+# Docker Desktop
+[[ -d "$HOME/.docker/bin" ]] && export PATH="$PATH:$HOME/.docker/bin"
+
 # NVM
 export NVM_DIR="$HOME/.nvm"
 
